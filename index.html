@@ -826,7 +826,7 @@
 const BUILT_IN_SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQHwHWi9sRKg3xIH68ais9sOvlqEuEfElUUR5Obhzx26GU6EgX7fXwL4_TweaWnzdFstkSukv2KcaGH/pub?gid=0&single=true&output=csv';
 
 const STORAGE_KEY = 'attendance_league_stewards_v1';
-const DEFAULT_PIN = '1234';
+const ADMIN_PIN = '8320';   // admin PIN: change it here
 
 // ===================== POINTS =====================
 // One result per week, scored on that week's attendance.
@@ -875,7 +875,7 @@ function paintIcons(root) {
 }
 
 // ===================== STATE =====================
-let settings = { sheetUrl: '', pin: DEFAULT_PIN, title: 'Stewards Attendance League' };
+let settings = { sheetUrl: '', title: 'Stewards Attendance League' };
 let classes = [];          // [{ id, name, house, colour, emoji, attendance: {1:96.2,...} }]
 let weekCount = 0;
 let usingHouses = false;
@@ -931,7 +931,7 @@ function getNextBadge(cls) {
 
 // ===================== PERSISTENCE =====================
 function loadSettings() {
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) settings = Object.assign(settings, JSON.parse(raw)); } catch (e) {}
+  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) { settings = Object.assign(settings, JSON.parse(raw)); delete settings.pin; } } catch (e) {}
 }
 function saveSettings() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); } catch (e) {}
@@ -1571,7 +1571,7 @@ function requireAuth(callback) {
   return false;
 }
 function submitPin() {
-  if (document.getElementById('pinInput').value === (settings.pin || DEFAULT_PIN)) {
+  if (document.getElementById('pinInput').value === ADMIN_PIN) {
     isAuthenticated = true;
     document.getElementById('pinOverlay').classList.remove('open');
     const cb = pinCallback; pinCallback = null;
