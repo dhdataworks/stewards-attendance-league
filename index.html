@@ -258,6 +258,12 @@
   .t-row .n { font-weight: 500; color: var(--ink-2); }
   .t-row .p b { font-size: 1.05rem; font-weight: 700; }
   .t-row .p span { display: block; font-size: 0.72rem; color: var(--dim); }
+  .t-section { padding: 14px 20px 10px; border-bottom: 1px solid var(--line); }
+  .t-section b { font-size: 0.9rem; font-weight: 600; }
+  .t-section span { display: block; font-size: 0.78rem; color: var(--dim); }
+  .t-row + .t-section { border-top: 1px solid var(--line); background: #fafbfd; }
+  .rank.rise, .chip.rise { background: var(--win-bg); color: var(--win); }
+  .admin-view-tag { font-size: 0.7rem; font-weight: 600; color: var(--none); background: var(--none-bg); border-radius: 6px; padding: 2px 7px; margin-left: 6px; }
 
   /* ===================== HOUSES ===================== */
   .house-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 16px; }
@@ -595,6 +601,7 @@
       <button class="btn btn-sm" onclick="openDataSource()"><span data-ico="link"></span>Data source</button>
       <button class="btn btn-sm" onclick="refreshData()"><span data-ico="refresh"></span>Refresh</button>
       <button class="btn btn-sm" onclick="openTutorCards()"><span data-ico="idcard"></span>Tutor cards</button>
+      <button class="btn btn-sm" id="fullTableBtn" onclick="toggleFullTable()" title="Show every group in the league table (admin only, never on public screens)"><span data-ico="list"></span>Show full table</button>
       <div class="entry-tracker">
         <span id="weekCompletion">—</span>
         <div class="entry-bar"><div class="entry-bar-fill" id="entryBarFill"></div></div>
@@ -643,7 +650,7 @@
             <div class="key-item point"><div class="key-pts">1</div><div class="key-text"><b>Point</b><span>75% – 89.9%</span></div></div>
             <div class="key-item none"><div class="key-pts">0</div><div class="key-text"><b>No points</b><span>Below 75%</span></div></div>
           </div>
-          <div class="key-note">Groups are ranked on total points. If two groups are level, the higher average attendance goes above. Badges are for recognition and don't add points.</div>
+          <div class="key-note">Groups are ranked on total points. If two groups are level, the higher average attendance goes above. Badges are for recognition and don't add points. The table celebrates the top 10 and the groups making the biggest strides; every group still scores points for its house.</div>
         </div>
         <div class="card table-card">
           <div class="t-head">
@@ -830,6 +837,16 @@ const BANDS = [
 function bandFor(pct) { return BANDS.find(b => pct >= b.min) || BANDS[BANDS.length - 1]; }
 const STREAK_THRESHOLD = 95;   // a streak week is a win week
 
+// ===================== SPOTLIGHT =====================
+// Public views show only groups that are doing well or making strong progress.
+// Every group still scores points and counts towards its house total.
+const SPOTLIGHT = {
+  topN: 10,      // "Top of the league": this many groups by points
+  riseMin: 2,    // "On the rise": attendance up at least this many % points on the week before…
+  climbMin: 3,   // …or climbed at least this many places in the table…
+  winWeek: true, // …or won the latest week (95%+)
+};
+
 // ===================== ICONS =====================
 const ICONS = {
   grid:    '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
@@ -867,6 +884,8 @@ let pinCallback = null;
 let lastLoadedAt = null;
 let currentView = 'overview';
 let statsCache = new Map();
+let spotCache = null;
+let showFullTable = false;   // admin-only full table
 
 const VIEW_TITLES = { overview: 'Overview', table: 'League table', houses: 'Houses', badges: 'Badges', news: 'League news' };
 // Plain colour names typed in the sheet are swapped for softer shades that sit well on white
@@ -1001,6 +1020,7 @@ function ingestRows(rows) {
   usingHouses = houseSeen;
   lastLoadedAt = new Date();
   statsCache = new Map();
+  spotCache = null;
 }
 
 async function loadFromSheet(url, opts) {
@@ -1063,6 +1083,44 @@ function rankingsAtWeek(w) {
 function getMovements() {
   const latest = latestWeekWithData();
   return latest <= 1 ? {} : rankingsAtWeek(latest - 1);
+}
+
+// Who appears on public views: the top of the league, plus groups outside it
+// that are making strong progress. Each "riser" carries the reasons it is shown.
+function getSpotlight() {
+  if (spotCache) return spotCache;
+  const ranked = getSortedClasses().filter(c => getStats(c).played > 0);
+  const leaders = ranked.slice(0, SPOTLIGHT.topN);
+  const leaderIds = new Set(leaders.map(c => c.id));
+  const latest = latestWeekWithData();
+  const curr = latest > 1 ? rankingsAtWeek(latest) : {};
+  const prev = latest > 1 ? rankingsAtWeek(latest - 1) : {};
+  const risers = [];
+  ranked.forEach(c => {
+    if (leaderIds.has(c.id)) return;
+    const now = c.attendance[latest], before = latest > 1 ? c.attendance[latest - 1] : undefined;
+    if (now === undefined) return;
+    const reasons = [];
+    const rise = before !== undefined ? now - before : 0;
+    if (before !== undefined && rise >= SPOTLIGHT.riseMin)
+      reasons.push({ icon: '📈', text: `Up ${rise.toFixed(1)}% on Week ${latest - 1}` });
+    const places = prev[c.id] !== undefined && curr[c.id] !== undefined ? prev[c.id] - curr[c.id] : 0;
+    if (places >= SPOTLIGHT.climbMin)
+      reasons.push({ icon: '🚀', text: `Climbed ${places} places` });
+    if (SPOTLIGHT.winWeek && now >= 95)
+      reasons.push({ icon: '✅', text: `Won Week ${latest}` });
+    if (reasons.length) risers.push({ cls: c, reasons, rise, places });
+  });
+  risers.sort((a, b) => b.reasons.length - a.reasons.length || b.rise - a.rise || b.places - a.places);
+  spotCache = { leaders, risers, ids: new Set([...leaderIds, ...risers.map(r => r.cls.id)]), total: ranked.length };
+  return spotCache;
+}
+function riserFor(cls) { return getSpotlight().risers.find(r => r.cls.id === cls.id) || null; }
+function reasonChips(r) { return r ? r.reasons.map(x => `<span class="chip rise">${x.icon} ${x.text}</span>`).join('') : ''; }
+function spotlightRule() {
+  const parts = [`up ${SPOTLIGHT.riseMin}%+ on the week before`, `climbed ${SPOTLIGHT.climbMin}+ places`];
+  if (SPOTLIGHT.winWeek) parts.push('won the latest week (95%+)');
+  return parts.join(', ');
 }
 
 function getMostImproved() {
@@ -1154,11 +1212,11 @@ const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 const nm = c => `${c.emoji ? c.emoji + ' ' : ''}${esc(c.name)}`;
 function ordSuffix(n) { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return s[(v - 20) % 10] || s[v] || s[0]; }
 function rankBadge(pos, played) { return `<span class="rank${played && pos <= 3 ? ' r' + pos : ''}">${pos}</span>`; }
-function moveTag(prev, pos) {
+function moveTag(prev, pos, showDown) {
   if (prev === undefined) return '';
   const d = prev - pos;
   if (d > 0) return `<span class="move up" title="Up ${d} since last week">▲${d}</span>`;
-  if (d < 0) return `<span class="move down" title="Down ${-d} since last week">▼${-d}</span>`;
+  if (d < 0) return showDown ? `<span class="move down" title="Down ${-d} since last week">▼${-d}</span>` : '';
   return `<span class="move flat" title="Same place as last week">–</span>`;
 }
 function formDots(s) {
@@ -1182,6 +1240,7 @@ function showView(view) {
 // ===================== RENDER =====================
 function render() {
   statsCache = new Map();
+  spotCache = null;
   renderStatusLine();
   document.getElementById('brandTitle').textContent = settings.title || 'Attendance League';
 
@@ -1274,21 +1333,49 @@ function kpi(label, value, sub) {
   return `<div class="card kpi"><div class="kpi-label">${label}</div><div class="kpi-value">${value}</div><div class="kpi-sub">${sub}</div></div>`;
 }
 
+// One table row. `riser` replaces the position with a rising badge and the reasons it is shown.
+function tableRow(c, pos, prevPos, opts) {
+  const s = getStats(c);
+  const posCell = opts.riser
+    ? `<span class="rank rise" title="On the rise">▲</span>`
+    : `${rankBadge(pos, s.played > 0)}${moveTag(prevPos, pos, opts.full)}`;
+  return `<div class="t-row" onclick="openDetail(${c.id})">
+    <div class="c-pos">${posCell}</div>
+    <div>
+      <div class="g-name"><span class="dot" style="background:${c.colour}"></span>${nm(c)}${c.house ? `<span class="g-house">${esc(c.house)}</span>` : ''}</div>
+      <div class="g-meta">${opts.riser ? reasonChips(opts.riser) : ''}${formDots(s)}${streakChip(s)}${badgeChip(s)}${opts.riser ? '' : statusChip(c)}</div>
+    </div>
+    <div class="n hide-sm">${s.played}</div>
+    <div class="n hide-sm">${s.wins}</div>
+    <div class="n">${pct(s.overallPct)}</div>
+    <div class="p"><b>${s.pts}</b>${s.lastWeekPts !== null ? `<span>+${s.lastWeekPts} last week</span>` : ''}</div>
+  </div>`;
+}
+const tSection = (title, hint) => `<div class="t-section"><b>${title}</b>${hint ? `<span>${hint}</span>` : ''}</div>`;
+
 function renderTable(sorted, prev) {
-  document.getElementById('tableBody').innerHTML = sorted.map((c, i) => {
-    const pos = i + 1, s = getStats(c);
-    return `<div class="t-row" onclick="openDetail(${c.id})">
-      <div class="c-pos">${rankBadge(pos, s.played > 0)}${moveTag(prev[c.id], pos)}</div>
-      <div>
-        <div class="g-name"><span class="dot" style="background:${c.colour}"></span>${nm(c)}${c.house ? `<span class="g-house">${esc(c.house)}</span>` : ''}</div>
-        <div class="g-meta">${formDots(s)}${streakChip(s)}${badgeChip(s)}${statusChip(c)}</div>
-      </div>
-      <div class="n hide-sm">${s.played}</div>
-      <div class="n hide-sm">${s.wins}</div>
-      <div class="n">${pct(s.overallPct)}</div>
-      <div class="p"><b>${s.pts}</b>${s.lastWeekPts !== null ? `<span>+${s.lastWeekPts} last week</span>` : ''}</div>
-    </div>`;
-  }).join('');
+  const body = document.getElementById('tableBody');
+  if (showFullTable) {
+    body.innerHTML = tSection(`Full table<span class="admin-view-tag" style="display:inline">Admin only</span>`, 'Every group in order. Not for public screens: switch off from the admin bar.')
+      + sorted.map((c, i) => tableRow(c, i + 1, prev[c.id], { full: true })).join('');
+    return;
+  }
+  const sp = getSpotlight();
+  let html = tSection(`Top ${sp.leaders.length}`, 'The leading groups on points')
+    + (sp.leaders.map((c, i) => tableRow(c, i + 1, prev[c.id], {})).join('') || '<div class="t-section"><span>No results yet.</span></div>');
+  html += tSection('On the rise', `Outside the top ${SPOTLIGHT.topN}, but ${spotlightRule().replace(/, ([^,]*)$/, ' or $1')}`);
+  html += sp.risers.length
+    ? sp.risers.map(r => tableRow(r.cls, null, undefined, { riser: r })).join('')
+    : '<div class="t-section"><span>No big movers this week. Every group can get here next week.</span></div>';
+  body.innerHTML = html;
+}
+function toggleFullTable() {
+  showFullTable = !showFullTable;
+  const btn = document.getElementById('fullTableBtn');
+  btn.classList.toggle('btn-primary', showFullTable);
+  btn.lastChild.textContent = showFullTable ? 'Hide full table' : 'Show full table';
+  render();
+  if (showFullTable) showView('table');
 }
 
 function renderHouses() {
@@ -1495,7 +1582,11 @@ function submitPin() {
 function closePin() { document.getElementById('pinOverlay').classList.remove('open'); pinCallback = null; }
 function toggleAdmin() {
   const bar = document.getElementById('adminBar');
-  if (!bar.hidden) { bar.hidden = true; document.getElementById('showAdminBtn').classList.remove('active'); return; }
+  if (!bar.hidden) {
+    bar.hidden = true; document.getElementById('showAdminBtn').classList.remove('active');
+    if (showFullTable) toggleFullTable();   // never leave the full table up after leaving admin
+    return;
+  }
   if (!requireAuth(toggleAdmin)) return;
   bar.hidden = false;
   document.getElementById('showAdminBtn').classList.add('active');
@@ -1536,11 +1627,20 @@ function groupMission(s) {
 
 function groupCardHTML(cls, pos, total, prevPos, large) {
   const s = getStats(cls);
+  const inTop = pos <= SPOTLIGHT.topN || showFullTable;   // admin full-table mode shows every position
+  const riser = riserFor(cls);
   let move = '';
-  if (prevPos !== undefined) {
+  if (prevPos !== undefined && inTop) {
     const d = prevPos - pos;
-    move = d > 0 ? ` · <span class="up">▲${d} this week</span>` : d < 0 ? ` · <span class="down">▼${-d} this week</span>` : ' · <span class="flat">same place</span>';
+    move = d > 0 ? ` · <span class="up">▲${d} this week</span>` : d === 0 ? ' · <span class="flat">same place</span>' : '';
+  } else if (riser) {
+    move = ` · <span class="up">${riser.reasons[0].icon} ${riser.reasons[0].text}</span>`;
   }
+  // Position is only shown inside the top section; everyone else sees their points
+  const posBlock = inTop
+    ? `<div class="n">${pos}${ordSuffix(pos)}</div><div class="l">of ${total}</div>`
+    : riser ? `<div class="n" style="color:var(--win)">▲</div><div class="l">On the rise</div>`
+    : `<div class="n">${s.pts}</div><div class="l">points</div>`;
   const next = getNextBadge(cls);
   let ledger = '';
   if (large) {
@@ -1561,7 +1661,7 @@ function groupCardHTML(cls, pos, total, prevPos, large) {
     <div class="tc-head">
       <span class="dot" style="background:${cls.colour}"></span>
       <div><div class="tc-name">${nm(cls)}</div><div class="tc-house">${cls.house ? esc(cls.house) : 'No house'}${move}</div></div>
-      <div class="tc-pos"><div class="n">${pos}${ordSuffix(pos)}</div><div class="l">of ${total}</div></div>
+      <div class="tc-pos">${posBlock}</div>
     </div>
     <div class="tc-stats">
       <div class="tc-stat"><div class="v">${s.pts}</div><div class="l">Points</div></div>
@@ -1598,13 +1698,18 @@ function openHouseDetail(houseName) {
   const h = getHouseStats().find(x => x.name === houseName);
   const badges = members.reduce((a, c) => a + getStats(c).badges.length, 0);
   document.getElementById('houseDetailName').innerHTML = `<span class="dot" style="background:${members[0].colour};width:14px;height:14px"></span>${esc(houseName)}`;
-  document.getElementById('houseDetailSub').textContent = `${plural(members.length, 'group')} · ranked by points`;
+  const sp = getSpotlight();
+  const shown = showFullTable ? members : members.filter(c => sp.ids.has(c.id));
+  const others = members.length - shown.length;
+  document.getElementById('houseDetailSub').textContent = showFullTable
+    ? `${plural(members.length, 'group')} · ranked by points (admin view)`
+    : `${plural(members.length, 'group')} · groups in the top ${SPOTLIGHT.topN} or on the rise`;
   document.getElementById('houseDetailStats').innerHTML = `
     <div class="stat"><div class="v">${h.pts}</div><div class="l">Total points</div></div>
     <div class="stat"><div class="v">${pct(h.avg)}</div><div class="l">Average attendance</div></div>
     <div class="stat"><div class="v">${h.wins}</div><div class="l">Weekly wins</div></div>
     <div class="stat"><div class="v">${badges}</div><div class="l">Badges</div></div>`;
-  document.getElementById('houseGroupsList').innerHTML = members.map(c => {
+  document.getElementById('houseGroupsList').innerHTML = shown.map(c => {
     const s = getStats(c);
     let weeks = '';
     for (let w = 1; w <= weekCount; w++) {
@@ -1612,16 +1717,22 @@ function openHouseDetail(houseName) {
       weeks += `<span class="wk ${v !== undefined ? bandFor(v).key : 'blank'}"><i>W${w}</i><b>${v !== undefined ? v.toFixed(1) : '–'}</b></span>`;
     }
     const overall = sortedAll.findIndex(x => x.id === c.id) + 1;
+    const r = riserFor(c);
+    const tag = (showFullTable || overall <= SPOTLIGHT.topN)
+      ? `<span class="g-house">${overall}${ordSuffix(overall)} overall</span>`
+      : (r ? reasonChips(r) : '');
     return `<div class="hg-row" onclick="closeHouseDetail();openDetail(${c.id})">
       <div class="hg-top">
-        <div class="g-name"><span class="dot" style="background:${c.colour}"></span>${nm(c)}<span class="g-house">${overall}${ordSuffix(overall)} overall</span></div>
+        <div class="g-name"><span class="dot" style="background:${c.colour}"></span>${nm(c)}${tag}</div>
         <div class="n">${plural(s.wins, 'win')}</div>
         <div class="n">${pct(s.overallPct)}</div>
         <div class="p">${s.pts} pts</div>
       </div>
       <div class="hg-weeks">${weeks}</div>
     </div>`;
-  }).join('');
+  }).join('') + (!others ? '' : others === members.length
+    ? `<div class="empty">No ${esc(houseName)} groups are in the spotlight this week. All ${plural(others, 'group')} add points to the house total.</div>`
+    : `<div class="empty">${plural(others, 'other group')} also ${others === 1 ? 'adds' : 'add'} points to the ${esc(houseName)} total.</div>`);
   document.getElementById('houseDetailOverlay').classList.add('open');
 }
 function closeHouseDetail() { document.getElementById('houseDetailOverlay').classList.remove('open'); }
@@ -1691,7 +1802,10 @@ function closeHighlights() { document.getElementById('highlightsOverlay').classL
 function openTutorCards() {
   if (!classes.length) { toast('No data loaded yet'); return; }
   const sorted = getSortedClasses(), prev = getMovements();
-  document.getElementById('cardsGrid').innerHTML = sorted.map((c, i) => groupCardHTML(c, i + 1, sorted.length, prev[c.id], false)).join('');
+  const posOf = {}; sorted.forEach((c, i) => posOf[c.id] = i + 1);
+  // Alphabetical, so the printed pile doesn't reveal the table order
+  const byName = [...classes].sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }));
+  document.getElementById('cardsGrid').innerHTML = byName.map(c => groupCardHTML(c, posOf[c.id], sorted.length, prev[c.id], false)).join('');
   document.getElementById('cardsOverlay').classList.add('open');
 }
 function closeTutorCards() { document.getElementById('cardsOverlay').classList.remove('open'); }
@@ -1745,9 +1859,11 @@ function fanfare() {
 }
 
 function openReveal() {
-  const sorted = getSortedClasses().filter(c => getStats(c).played > 0);
+  const sp = getSpotlight();
+  const sorted = sp.leaders;   // only the top section is counted down
   if (!sorted.length) { toast('No results to reveal yet'); return; }
   const steps = [];
+  if (sp.risers.length) steps.push({ type: 'risers', risers: sp.risers });
   sorted.map((c, i) => ({ cls: c, pos: i + 1 })).reverse().forEach(o => {
     if (o.pos === 3) steps.push({ type: 'inter', text: 'In third place…' });
     if (o.pos === 2) steps.push({ type: 'inter', text: 'In second place…' });
@@ -1759,7 +1875,7 @@ function openReveal() {
   document.getElementById('revealDone').innerHTML = '';
   document.getElementById('revealHint').hidden = true;
   document.getElementById('revealStage').innerHTML = `<div class="reveal-start">
-    <p>${sorted.length} groups, revealed from ${sorted.length}${ordSuffix(sorted.length)} place up to 1st.</p>
+    <p>${sp.risers.length ? `First, the groups on the rise. Then the top ${sorted.length}` : `The top ${sorted.length}`}, revealed from ${sorted.length}${ordSuffix(sorted.length)} place up to 1st.</p>
     <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
       <button class="btn btn-primary" onclick="startReveal(true)">Start the reveal</button>
       <button class="btn" onclick="startReveal(false)">Click to advance</button>
@@ -1809,7 +1925,18 @@ function revealStep() {
   if (!step) return;
   const stage = document.getElementById('revealStage');
   stashLast();
-  if (step.type === 'inter') {
+  if (step.type === 'risers') {
+    const list = step.risers.slice(0, 12);
+    stage.innerHTML = `<div class="reveal-champ" style="--rc:var(--win)">
+      <div class="trophy">📈</div>
+      <div class="lab" style="color:var(--win)">On the rise this week</div>
+      <div class="reveal-done" style="margin:16px auto 0">${list.map(r =>
+        `<span class="gchip"><span class="dot" style="background:${r.cls.colour}"></span>${nm(r.cls)} <b style="color:var(--win)">${r.reasons[0].icon} ${r.reasons[0].text}</b></span>`).join('')}</div>
+      ${step.risers.length > list.length ? `<div class="reveal-hint">…and ${plural(step.risers.length - list.length, 'more group')}</div>` : ''}
+    </div>`;
+    fanfare();
+    scheduleRevealStep(Math.min(9000, 4000 + list.length * 400));
+  } else if (step.type === 'inter') {
     const champ = step.text.includes('champions');
     stage.innerHTML = `<div class="reveal-inter">${step.text}</div>`;
     drumroll(champ ? 2.2 : 1.6);
@@ -1871,17 +1998,26 @@ function kioskRow(c, pos) {
     <div class="k-pts">${s.pts}<small>pts</small></div>
   </div>`;
 }
+function kioskRiserRow(r) {
+  const c = r.cls, s = getStats(c);
+  return `<div class="k-row">
+    <span class="rank rise">▲</span>
+    <div class="k-name"><span class="dot" style="background:${c.colour}"></span><span class="t">${nm(c)}</span>${c.house ? `<span class="h">${esc(c.house)}</span>` : ''}</div>
+    <div class="k-att" style="color:var(--win);font-weight:600">${r.reasons[0].icon} ${r.reasons[0].text}</div>
+    <div class="k-pts">${s.pts}<small>pts</small></div>
+  </div>`;
+}
 function buildKioskSlides() {
   const slides = [];
   const sorted = getSortedClasses().filter(c => getStats(c).played > 0);
   if (!sorted.length) return slides;
-  slides.push({ title: 'Top of the league', html: `<div class="kiosk-rows">${sorted.slice(0, 10).map((c, i) => kioskRow(c, i + 1)).join('')}</div>` });
-  // the rest of the table, split evenly into pages of no more than 20 so every group gets screen time
-  const rest = sorted.length - 10;
-  const perPage = rest > 0 ? Math.ceil(rest / Math.ceil(rest / 20)) : 20;
-  for (let start = 10; start < sorted.length; start += perPage) {
-    const end = Math.min(start + perPage, sorted.length);
-    slides.push({ title: `Places ${start + 1} to ${end}`, html: `<div class="kiosk-cols">${sorted.slice(start, end).map((c, i) => kioskRow(c, start + i + 1)).join('')}</div>` });
+  const sp = getSpotlight();
+  slides.push({ title: 'Top of the league', html: `<div class="kiosk-rows">${sp.leaders.map((c, i) => kioskRow(c, i + 1)).join('')}</div>` });
+  // Groups outside the top making strong progress, in pages of up to 20
+  for (let start = 0; start < sp.risers.length; start += 20) {
+    const page = sp.risers.slice(start, start + 20);
+    const wrap = sp.risers.length > 10 ? 'kiosk-cols' : 'kiosk-rows';
+    slides.push({ title: 'On the rise', html: `<div class="${wrap}">${page.map(kioskRiserRow).join('')}</div>` });
   }
   if (usingHouses) {
     const hs = getHouseStats();
