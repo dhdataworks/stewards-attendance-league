@@ -262,6 +262,8 @@
   .t-section b { font-size: 0.9rem; font-weight: 600; }
   .t-section span { display: block; font-size: 0.78rem; color: var(--dim); }
   .t-row + .t-section { border-top: 1px solid var(--line); background: #fafbfd; }
+  .t-row.t-row-static { cursor: default; min-height: 52px; }
+  .t-row.t-row-static:hover { background: none; }
   .rank.rise, .chip.rise { background: var(--win-bg); color: var(--win); }
   .admin-view-tag { font-size: 0.7rem; font-weight: 600; color: var(--none); background: var(--none-bg); border-radius: 6px; padding: 2px 7px; margin-left: 6px; }
 
@@ -842,9 +844,7 @@ const STREAK_THRESHOLD = 95;   // a streak week is a win week
 // Every group still scores points and counts towards its house total.
 const SPOTLIGHT = {
   topN: 10,      // "Top of the league": this many groups by points
-  riseMin: 2,    // "On the rise": attendance up at least this many % points on the week before…
-  climbMin: 3,   // …or climbed at least this many places in the table…
-  winWeek: true, // …or won the latest week (95%+)
+                 // "On the rise": every other group whose attendance went up on the week before
 };
 
 // ===================== ICONS =====================
@@ -1093,35 +1093,20 @@ function getSpotlight() {
   const leaders = ranked.slice(0, SPOTLIGHT.topN);
   const leaderIds = new Set(leaders.map(c => c.id));
   const latest = latestWeekWithData();
-  const curr = latest > 1 ? rankingsAtWeek(latest) : {};
-  const prev = latest > 1 ? rankingsAtWeek(latest - 1) : {};
   const risers = [];
   ranked.forEach(c => {
-    if (leaderIds.has(c.id)) return;
-    const now = c.attendance[latest], before = latest > 1 ? c.attendance[latest - 1] : undefined;
-    if (now === undefined) return;
-    const reasons = [];
-    const rise = before !== undefined ? now - before : 0;
-    if (before !== undefined && rise >= SPOTLIGHT.riseMin)
-      reasons.push({ icon: '📈', text: `Up ${rise.toFixed(1)}% on Week ${latest - 1}` });
-    const places = prev[c.id] !== undefined && curr[c.id] !== undefined ? prev[c.id] - curr[c.id] : 0;
-    if (places >= SPOTLIGHT.climbMin)
-      reasons.push({ icon: '🚀', text: `Climbed ${places} places` });
-    if (SPOTLIGHT.winWeek && now >= 95)
-      reasons.push({ icon: '✅', text: `Won Week ${latest}` });
-    if (reasons.length) risers.push({ cls: c, reasons, rise, places });
+    if (leaderIds.has(c.id) || latest < 2) return;
+    const now = c.attendance[latest], before = c.attendance[latest - 1];
+    if (now === undefined || before === undefined) return;
+    const rise = Math.round((now - before) * 10) / 10;   // so "Up 0.0%" can't appear
+    if (rise > 0) risers.push({ cls: c, rise, reasons: [{ icon: '📈', text: `Up ${rise.toFixed(1)}% on Week ${latest - 1}` }] });
   });
-  risers.sort((a, b) => b.reasons.length - a.reasons.length || b.rise - a.rise || b.places - a.places);
+  risers.sort((a, b) => b.rise - a.rise || a.cls.name.localeCompare(b.cls.name, 'en', { numeric: true }));
   spotCache = { leaders, risers, ids: new Set([...leaderIds, ...risers.map(r => r.cls.id)]), total: ranked.length };
   return spotCache;
 }
 function riserFor(cls) { return getSpotlight().risers.find(r => r.cls.id === cls.id) || null; }
 function reasonChips(r) { return r ? r.reasons.map(x => `<span class="chip rise">${x.icon} ${x.text}</span>`).join('') : ''; }
-function spotlightRule() {
-  const parts = [`up ${SPOTLIGHT.riseMin}%+ on the week before`, `climbed ${SPOTLIGHT.climbMin}+ places`];
-  if (SPOTLIGHT.winWeek) parts.push('won the latest week (95%+)');
-  return parts.join(', ');
-}
 
 function getMostImproved() {
   const latest = latestWeekWithData();
@@ -1333,6 +1318,15 @@ function kpi(label, value, sub) {
   return `<div class="card kpi"><div class="kpi-label">${label}</div><div class="kpi-value">${value}</div><div class="kpi-sub">${sub}</div></div>`;
 }
 
+// "On the rise" row: name and improvement only. No stats, and it doesn't open a card.
+function riserRow(r) {
+  const c = r.cls;
+  return `<div class="t-row t-row-static">
+    <div class="c-pos"><span class="rank rise" title="On the rise">▲</span></div>
+    <div><div class="g-name"><span class="dot" style="background:${c.colour}"></span>${nm(c)}${reasonChips(r)}</div></div>
+    <div class="n hide-sm"></div><div class="n hide-sm"></div><div class="n"></div><div class="p"></div>
+  </div>`;
+}
 // One table row. `riser` replaces the position with a rising badge and the reasons it is shown.
 function tableRow(c, pos, prevPos, opts) {
   const s = getStats(c);
@@ -1363,9 +1357,9 @@ function renderTable(sorted, prev) {
   const sp = getSpotlight();
   let html = tSection(`Top ${sp.leaders.length}`, 'The leading groups on points')
     + (sp.leaders.map((c, i) => tableRow(c, i + 1, prev[c.id], {})).join('') || '<div class="t-section"><span>No results yet.</span></div>');
-  html += tSection('On the rise', `Outside the top ${SPOTLIGHT.topN}, but ${spotlightRule().replace(/, ([^,]*)$/, ' or $1')}`);
+  html += tSection('On the rise', `Outside the top ${SPOTLIGHT.topN} and up on the week before`);
   html += sp.risers.length
-    ? sp.risers.map(r => tableRow(r.cls, null, undefined, { riser: r })).join('')
+    ? sp.risers.map(riserRow).join('')
     : '<div class="t-section"><span>No big movers this week. Every group can get here next week.</span></div>';
   body.innerHTML = html;
 }
@@ -1699,11 +1693,12 @@ function openHouseDetail(houseName) {
   const badges = members.reduce((a, c) => a + getStats(c).badges.length, 0);
   document.getElementById('houseDetailName').innerHTML = `<span class="dot" style="background:${members[0].colour};width:14px;height:14px"></span>${esc(houseName)}`;
   const sp = getSpotlight();
-  const shown = showFullTable ? members : members.filter(c => sp.ids.has(c.id));
+  const topIds = new Set(sp.leaders.map(c => c.id));
+  const shown = showFullTable ? members : members.filter(c => topIds.has(c.id));
   const others = members.length - shown.length;
   document.getElementById('houseDetailSub').textContent = showFullTable
     ? `${plural(members.length, 'group')} · ranked by points (admin view)`
-    : `${plural(members.length, 'group')} · groups in the top ${SPOTLIGHT.topN} or on the rise`;
+    : `${houseName} groups in the league's top ${SPOTLIGHT.topN}`;
   document.getElementById('houseDetailStats').innerHTML = `
     <div class="stat"><div class="v">${h.pts}</div><div class="l">Total points</div></div>
     <div class="stat"><div class="v">${pct(h.avg)}</div><div class="l">Average attendance</div></div>
@@ -1717,10 +1712,9 @@ function openHouseDetail(houseName) {
       weeks += `<span class="wk ${v !== undefined ? bandFor(v).key : 'blank'}"><i>W${w}</i><b>${v !== undefined ? v.toFixed(1) : '–'}</b></span>`;
     }
     const overall = sortedAll.findIndex(x => x.id === c.id) + 1;
-    const r = riserFor(c);
-    const tag = (showFullTable || overall <= SPOTLIGHT.topN)
-      ? `<span class="g-house">${overall}${ordSuffix(overall)} overall</span>`
-      : (r ? reasonChips(r) : '');
+    const tag = overall <= SPOTLIGHT.topN
+      ? `<span class="chip gold">🏆 Top ${SPOTLIGHT.topN} · ${overall}${ordSuffix(overall)}</span>`
+      : `<span class="g-house">${overall}${ordSuffix(overall)} overall</span>`;   // admin view only
     return `<div class="hg-row" onclick="closeHouseDetail();openDetail(${c.id})">
       <div class="hg-top">
         <div class="g-name"><span class="dot" style="background:${c.colour}"></span>${nm(c)}${tag}</div>
@@ -1731,7 +1725,7 @@ function openHouseDetail(houseName) {
       <div class="hg-weeks">${weeks}</div>
     </div>`;
   }).join('') + (!others ? '' : others === members.length
-    ? `<div class="empty">No ${esc(houseName)} groups are in the spotlight this week. All ${plural(others, 'group')} add points to the house total.</div>`
+    ? `<div class="empty">No ${esc(houseName)} groups are in the top ${SPOTLIGHT.topN} this week. All ${plural(others, 'group')} add points to the house total.</div>`
     : `<div class="empty">${plural(others, 'other group')} also ${others === 1 ? 'adds' : 'add'} points to the ${esc(houseName)} total.</div>`);
   document.getElementById('houseDetailOverlay').classList.add('open');
 }
@@ -1999,12 +1993,11 @@ function kioskRow(c, pos) {
   </div>`;
 }
 function kioskRiserRow(r) {
-  const c = r.cls, s = getStats(c);
-  return `<div class="k-row">
+  const c = r.cls;
+  return `<div class="k-row" style="grid-template-columns:5vw auto minmax(0,1fr)">
     <span class="rank rise">▲</span>
-    <div class="k-name"><span class="dot" style="background:${c.colour}"></span><span class="t">${nm(c)}</span>${c.house ? `<span class="h">${esc(c.house)}</span>` : ''}</div>
-    <div class="k-att" style="color:var(--win);font-weight:600">${r.reasons[0].icon} ${r.reasons[0].text}</div>
-    <div class="k-pts">${s.pts}<small>pts</small></div>
+    <div class="k-name"><span class="dot" style="background:${c.colour}"></span><span class="t">${nm(c)}</span></div>
+    <div><span class="chip rise" style="font-size:0.7em">${r.reasons[0].icon} ${r.reasons[0].text}</span></div>
   </div>`;
 }
 function buildKioskSlides() {
