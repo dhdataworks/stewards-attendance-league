@@ -731,7 +731,7 @@
       <summary>How to set up the sheet</summary>
       <div>
         <p>Row 1 holds the headings: <b>Group</b> · <b>House</b> · <b>Colour</b> · <b>Emoji</b> · <b>Week 1</b> · <b>Week 2</b> · … (add as many week columns as you need).</p>
-        <p>One row per group. Leave <b>House</b> blank if you're not using houses. <b>Colour</b> and <b>Emoji</b> are optional. Type attendance percentages into the week columns as they happen.</p>
+        <p>One row per group. Leave <b>House</b> blank if you're not using houses. <b>Colour</b> and <b>Emoji</b> are optional. You can also add a <b>House Emoji</b> column; if you don't, each house uses the emoji most of its groups have. Type attendance percentages into the week columns as they happen.</p>
         <p>Then: File → Share → <b>Publish to web</b> → choose the sheet → <b>Comma-separated values (.csv)</b> → Publish → copy the link.</p>
         <button class="btn btn-sm" onclick="downloadTemplate()">Download sheet template (CSV)</button>
       </div>
@@ -988,6 +988,7 @@ function ingestRows(rows) {
   const houseIdx  = header.findIndex(h => h === 'house');
   const colourIdx = header.findIndex(h => h === 'colour' || h === 'color' || h === 'house colour' || h === 'house color');
   const emojiIdx  = header.findIndex(h => h === 'emoji' || h === 'icon' || h === 'badge');
+  const houseEmojiIdx = header.findIndex(h => h === 'house emoji' || h === 'house icon');
   const weekCols = [];
   header.forEach((h, i) => { if (/^(week|wk|w)\s*\d+$/.test(h) || /week/.test(h)) weekCols.push(i); });
 
@@ -1016,7 +1017,8 @@ function ingestRows(rows) {
       if (raw !== '' && !isNaN(parseFloat(raw))) attendance[wi + 1] = parseFloat(raw);
     });
     const emoji = emojiIdx > -1 ? (cells[emojiIdx] || '').trim() : '';
-    out.push({ id: r, name, house, colour, emoji, attendance });
+    const houseEmoji = houseEmojiIdx > -1 ? (cells[houseEmojiIdx] || '').trim() : '';
+    out.push({ id: r, name, house, colour, emoji, houseEmoji, attendance });
   }
   classes = out;
   weekCount = weekCols.length;
@@ -1165,13 +1167,17 @@ function getHouseStats() {
   const map = {};
   classes.forEach(c => {
     if (!c.house) return;
-    if (!map[c.house]) map[c.house] = { name: c.house, colour: c.colour, pts: 0, wins: 0, pcts: [], groups: 0 };
+    if (!map[c.house]) map[c.house] = { name: c.house, colour: c.colour, pts: 0, wins: 0, pcts: [], groups: 0, setEmoji: '', emojis: {} };
     const s = getStats(c), h = map[c.house];
     h.pts += s.pts; h.wins += s.wins; h.groups++;
+    if (c.houseEmoji && !h.setEmoji) h.setEmoji = c.houseEmoji;
+    if (c.emoji) h.emojis[c.emoji] = (h.emojis[c.emoji] || 0) + 1;
     if (s.overallPct !== null) h.pcts.push(s.overallPct);
   });
   return Object.values(map).map(h => ({
     name: h.name, colour: h.colour, pts: h.pts, wins: h.wins, groups: h.groups,
+    // House Emoji column if filled in; otherwise the emoji used most by the house's tutor groups
+    emoji: h.setEmoji || (Object.entries(h.emojis).sort((a, b) => b[1] - a[1])[0] || [''])[0],
     avg: h.pcts.length ? h.pcts.reduce((a, b) => a + b, 0) / h.pcts.length : null,
   })).sort((a, b) => b.pts !== a.pts ? b.pts - a.pts : (b.avg || 0) - (a.avg || 0));
 }
@@ -1547,8 +1553,8 @@ async function refreshData() {
   catch (e) { toast('Refresh failed. Check the sheet is still published.'); render(); }
 }
 function downloadTemplate() {
-  const csv = 'Group,House,Colour,Emoji,Week 1,Week 2,Week 3,Week 4,Week 5,Week 6\n' +
-    '7A,Dragon,Red,🐉,,,,,,\n7B,Griffin,Green,🦅,,,,,,\n8A,Dragon,Red,⚡,,,,,,\n8B,Griffin,Green,⭐,,,,,,\n';
+  const csv = 'Group,House,Colour,Emoji,House Emoji,Week 1,Week 2,Week 3,Week 4,Week 5,Week 6\n' +
+    '7A,Dragon,Red,🐉,🐉,,,,,,\n7B,Griffin,Green,🦅,🦅,,,,,,\n8A,Dragon,Red,⚡,🐉,,,,,,\n8B,Griffin,Green,⭐,🦅,,,,,,\n';
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
   a.download = 'attendance-league-template.csv';
@@ -1876,7 +1882,7 @@ function groupRevealItem(c) {
 }
 function houseRevealItem(h) {
   const meta = `<span><b>${h.pts}</b> points</span><span title="${HOUSE_AVG_NOTE}"><b>${pct(h.avg)}</b> tutor group average</span><span>${plural(h.groups, 'tutor group')}</span>`;
-  return { label: esc(h.name), colour: h.colour, meta, champMeta: meta, note: `${HOUSE_AVG_NOTE}.` };
+  return { label: `${h.emoji ? h.emoji + ' ' : ''}${esc(h.name)}`, colour: h.colour, meta, champMeta: meta };
 }
 
 function openReveal(mode) {
@@ -2056,9 +2062,8 @@ function buildKioskSlides() {
     const hs = getHouseStats();
     if (hs.length) slides.push({ title: 'House race', html: `<div class="k-houses">${hs.map((h, i) => `
       <div class="k-house"><div class="house-strip" style="background:${h.colour}"></div>
-        <div class="k-house-body"><div class="pos">${i + 1}${ordSuffix(i + 1)}</div><div class="nm">${esc(h.name)}</div>
-        <div class="pts">${h.pts}<small>pts</small></div><div class="avg">${pct(h.avg)} tutor group average</div></div></div>`).join('')}</div>
-      <div class="kiosk-meta" style="margin-top:2.4vh">The tutor group average is the average of each tutor group's weekly attendance in the house.</div>` });
+        <div class="k-house-body"><div class="pos">${i + 1}${ordSuffix(i + 1)}</div><div class="nm">${h.emoji ? h.emoji + ' ' : ''}${esc(h.name)}</div>
+        <div class="pts">${h.pts}<small>pts</small></div><div class="avg">${pct(h.avg)} tutor group average</div></div></div>`).join('')}</div>` });
   }
   const lines = buildNewsLines();
   if (lines.length) slides.push({ title: 'League news', html: `<div class="k-news">${lines.slice(0, 5).map(l => `<div>${l}</div>`).join('')}</div>` });
