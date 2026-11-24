@@ -1266,18 +1266,26 @@ function weekAverage(w) {
   return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
 }
 
+// League points earned by all groups in one week, and the most available (3 per group with data)
+function weekPoints(w) {
+  const vals = classes.map(c => c.attendance[w]).filter(v => v !== undefined);
+  if (!vals.length) return null;
+  return { pts: vals.reduce((a, v) => a + bandFor(v).pts, 0), possible: vals.length * BANDS[0].pts };
+}
+
 function renderOverview(sorted, prev) {
   const lw = latestWeekWithData();
-  const avg = lw ? weekAverage(lw) : null;
-  const prevAvg = lw > 1 ? weekAverage(lw - 1) : null;
+  const weekPts = lw ? weekPoints(lw) : null;
+  const prevPts = lw > 1 ? weekPoints(lw - 1) : null;
   const winners = lw ? classes.filter(c => c.attendance[lw] !== undefined && c.attendance[lw] >= 95).length : 0;
   const entered = lw ? classes.filter(c => c.attendance[lw] !== undefined).length : 0;
   let delta = '';
-  if (avg !== null && prevAvg !== null) {
-    const d = avg - prevAvg;
-    delta = d > 0.05 ? `<span class="up">▲ ${d.toFixed(1)} pts on Week ${lw - 1}</span>`
-          : d < -0.05 ? `<span class="down">▼ ${(-d).toFixed(1)} pts on Week ${lw - 1}</span>`
-          : `<span class="flat">No change on Week ${lw - 1}</span>`;
+  if (weekPts !== null && prevPts !== null) {
+    const d = weekPts.pts - prevPts.pts;
+    // Kept positive: only rises get an arrow; a dip becomes a target to beat
+    delta = d > 0 ? `<span class="up">▲ ${plural(d, 'more point')} than Week ${lw - 1} 🎉</span>`
+          : d < 0 ? `<span class="flat">Week ${lw - 1} scored ${prevPts.pts}. Can we beat it next week?</span>`
+          : `<span class="up">Matching Week ${lw - 1}'s ${prevPts.pts} points</span>`;
   }
   const leader = sorted.find(c => getStats(c).played > 0);
   const houses = getHouseStats();
@@ -1287,7 +1295,7 @@ function renderOverview(sorted, prev) {
 
   document.getElementById('kpiRow').innerHTML =
     kpi('Weeks played', `${lw}<small>of ${weekCount}</small>`, lw ? `Week ${lw} is the latest entered` : 'No weeks entered yet') +
-    kpi(`Average attendance${lw ? ' · Week ' + lw : ''}`, pct(avg), delta || '&nbsp;') +
+    kpi(`Points earned${lw ? ' · Week ' + lw : ''}`, weekPts ? `${weekPts.pts}<small>points</small>` : '—', delta || '&nbsp;') +
     kpi(`Wins (95%+)${lw ? ' · Week ' + lw : ''}`, `${winners}<small>of ${entered}</small>`, lw ? `${plural(winners, 'group')} scored 3 points` : '&nbsp;') +
     lastTile;
 
