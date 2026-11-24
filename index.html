@@ -437,6 +437,8 @@
   .reveal-done { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 900px; margin-top: 24px; }
   .reveal-done .gchip { background: var(--card); border: 1px solid var(--line); }
   .reveal-done .gchip b { color: var(--dim); font-weight: 600; }
+  .reveal-note { color: var(--dim); font-size: 0.9rem; margin-top: 10px; }
+  .avg-note { font-size: 0.78rem; color: var(--dim); }
   .reveal-hint { color: var(--dim); font-size: 0.85rem; margin-top: 14px; }
   .reveal-controls { display: flex; gap: 10px; margin-top: auto; padding-top: 26px; flex-wrap: wrap; justify-content: center; }
 
@@ -574,7 +576,8 @@
 
       <div class="nav-label">Display</div>
       <button class="nav-item" onclick="openKiosk()"><span data-ico="tv"></span>Kiosk mode</button>
-      <button class="nav-item" onclick="openReveal()"><span data-ico="trophy"></span>Assembly reveal</button>
+      <button class="nav-item" onclick="openReveal('groups')"><span data-ico="trophy"></span>Tutor group reveal</button>
+      <button class="nav-item" id="houseRevealBtn" onclick="openReveal('houses')"><span data-ico="shield"></span>House reveal</button>
       <button class="nav-item" onclick="openHighlights()"><span data-ico="star"></span>Highlights</button>
     </nav>
 
@@ -627,7 +630,7 @@
           </div>
           <div class="card" id="houseStandingsCard">
             <div class="card-head">
-              <div><div class="card-title">House standings</div><div class="card-hint">Total points of every group in the house</div></div>
+              <div><div class="card-title">House standings</div><div class="card-hint">Total points of every tutor group in the house. The % is the average of each tutor group's weekly attendance.</div></div>
               <button class="btn btn-sm" onclick="showView('houses')">Houses</button>
             </div>
             <div id="houseBars"></div>
@@ -1316,7 +1319,7 @@ function renderOverview(sorted, prev) {
     const max = Math.max(...houses.map(h => h.pts), 1);
     document.getElementById('houseBars').innerHTML = houses.map((h, i) => `
       <div class="hbar" onclick="openHouseDetail('${houseQuote(h.name)}')">
-        <div class="hbar-top"><b>${rankBadge(i + 1, true)}<span class="dot" style="background:${h.colour}"></span>${esc(h.name)}</b><span><b>${h.pts}</b> pts · ${pct(h.avg)}</span></div>
+        <div class="hbar-top"><b>${rankBadge(i + 1, true)}<span class="dot" style="background:${h.colour}"></span>${esc(h.name)}</b><span><b>${h.pts}</b> pts · <span title="${HOUSE_AVG_NOTE}">${pct(h.avg)} avg</span></span></div>
         <div class="hbar-track"><div class="hbar-fill" style="width:${(h.pts / max * 100).toFixed(1)}%;background:${h.colour}"></div></div>
       </div>`).join('');
   } else card.hidden = true;
@@ -1384,21 +1387,21 @@ function renderHouses() {
   const grid = document.getElementById('houseGrid');
   const navBtn = document.querySelector('.nav-item[data-view="houses"]');
   if (!usingHouses) {
-    navBtn.hidden = true;
+    navBtn.hidden = true; document.getElementById('houseRevealBtn').hidden = true;
     grid.innerHTML = `<div class="card empty">No houses in the sheet. Add a House column to compare houses.</div>`;
     return;
   }
-  navBtn.hidden = false;
+  navBtn.hidden = false; document.getElementById('houseRevealBtn').hidden = false;
   grid.innerHTML = getHouseStats().map((h, i) => `
     <div class="card house-card" onclick="openHouseDetail('${houseQuote(h.name)}')">
       <div class="house-strip" style="background:${h.colour}"></div>
       <div class="house-body">
         <div class="house-top"><span class="house-name">${esc(h.name)}</span>${rankBadge(i + 1, true)}</div>
         <div class="house-pts">${h.pts}<small>points</small></div>
-        <div class="house-stats"><span>${pct(h.avg)} average</span><span>${plural(h.wins, 'win')}</span><span>${plural(h.groups, 'group')}</span></div>
+        <div class="house-stats"><span title="${HOUSE_AVG_NOTE}">${pct(h.avg)} tutor group average</span><span>${plural(h.wins, 'win')}</span><span>${plural(h.groups, 'group')}</span></div>
         <div class="house-link">View groups →</div>
       </div>
-    </div>`).join('');
+    </div>`).join('') + `<div class="avg-note" style="grid-column:1/-1">Points are the total of every tutor group in the house. The tutor group average is the average of each tutor group's weekly attendance.</div>`;
 }
 
 function renderBadges() {
@@ -1709,9 +1712,10 @@ function openHouseDetail(houseName) {
     : `${houseName} groups in the league's top ${SPOTLIGHT.topN}`;
   document.getElementById('houseDetailStats').innerHTML = `
     <div class="stat"><div class="v">${h.pts}</div><div class="l">Total points</div></div>
-    <div class="stat"><div class="v">${pct(h.avg)}</div><div class="l">Average attendance</div></div>
+    <div class="stat" title="${HOUSE_AVG_NOTE}"><div class="v">${pct(h.avg)}</div><div class="l">Tutor group average attendance</div></div>
     <div class="stat"><div class="v">${h.wins}</div><div class="l">Weekly wins</div></div>
-    <div class="stat"><div class="v">${badges}</div><div class="l">Badges</div></div>`;
+    <div class="stat"><div class="v">${badges}</div><div class="l">Badges</div></div>
+    <div class="avg-note" style="grid-column:1/-1">The tutor group average is the average of each ${esc(houseName)} tutor group's weekly attendance.</div>`;
   document.getElementById('houseGroupsList').innerHTML = shown.map(c => {
     const s = getStats(c);
     let weeks = '';
@@ -1768,7 +1772,7 @@ function buildHighlights() {
   const houseHtml = usingHouses && houses.length ? `
     <div class="hl-section">Winning house</div>
     <div class="card hl-row" style="padding:14px 18px;border-left:5px solid ${houses[0].colour}">
-      <div style="flex:1"><div style="font-weight:700;font-size:1.05rem">${esc(houses[0].name)}</div><div style="color:var(--dim);font-size:0.82rem">${pct(houses[0].avg)} average · ${plural(houses[0].wins, 'weekly win')}</div></div>
+      <div style="flex:1"><div style="font-weight:700;font-size:1.05rem">${esc(houses[0].name)}</div><div style="color:var(--dim);font-size:0.82rem">${pct(houses[0].avg)} tutor group average · ${plural(houses[0].wins, 'weekly win')}</div></div>
       <div style="font-weight:700;font-size:1.3rem">${houses[0].pts}<span style="font-size:0.8rem;color:var(--dim);font-weight:500"> pts</span></div>
     </div>` : '';
 
@@ -1860,24 +1864,53 @@ function fanfare() {
   [523.25, 659.25, 783.99].forEach(f => tone(f, 1.0, 0.08, 0.62));
 }
 
-function openReveal() {
-  const sp = getSpotlight();
-  const sorted = sp.leaders;   // only the top section is counted down
-  if (!sorted.length) { toast('No results to reveal yet'); return; }
+// Two modes: 'groups' (top tutor groups, after an "On the rise" shout-out) and 'houses' (every house).
+// Each place is an "item" so both modes share the same cards: { label, colour, meta, champMeta, note }
+const HOUSE_AVG_NOTE = "Average of every tutor group's weekly attendance in the house";
+function groupRevealItem(c) {
+  const s = getStats(c);
+  const house = c.house ? `<span>${esc(c.house)}</span>` : '';
+  return { label: nm(c), colour: c.colour,
+    meta: `<span><b>${s.pts}</b> points</span><span><b>${pct(s.overallPct)}</b> average</span>${house}`,
+    champMeta: `<span><b>${s.pts}</b> points</span><span><b>${pct(s.overallPct)}</b> average</span><span><b>${s.wins}</b> wins</span>${house}` };
+}
+function houseRevealItem(h) {
+  const meta = `<span><b>${h.pts}</b> points</span><span title="${HOUSE_AVG_NOTE}"><b>${pct(h.avg)}</b> tutor group average</span><span>${plural(h.groups, 'tutor group')}</span>`;
+  return { label: esc(h.name), colour: h.colour, meta, champMeta: meta, note: `${HOUSE_AVG_NOTE}.` };
+}
+
+function openReveal(mode) {
+  mode = mode === 'houses' ? 'houses' : 'groups';
   const steps = [];
-  if (sp.risers.length) steps.push({ type: 'risers', risers: sp.risers });
-  sorted.map((c, i) => ({ cls: c, pos: i + 1 })).reverse().forEach(o => {
-    if (o.pos === 3) steps.push({ type: 'inter', text: 'In third place…' });
-    if (o.pos === 2) steps.push({ type: 'inter', text: 'In second place…' });
-    if (o.pos === 1) steps.push({ type: 'inter', text: 'And your champions are…' });
-    steps.push({ type: o.pos === 1 ? 'champ' : 'card', cls: o.cls, pos: o.pos, total: sorted.length });
-  });
-  reveal = { open: true, started: false, finished: false, paused: false, auto: true, steps, idx: -1, timer: null, last: null };
-  document.getElementById('revealSub').textContent = settings.title || 'Attendance League';
+  let intro;
+  if (mode === 'houses') {
+    const hs = getHouseStats();
+    if (!hs.length) { toast('No houses in the sheet to reveal'); return; }
+    hs.map((h, i) => ({ item: houseRevealItem(h), pos: i + 1 })).reverse().forEach(o => {
+      if (o.pos === 2 && hs.length > 2) steps.push({ type: 'inter', text: 'In second place…' });
+      if (o.pos === 1) steps.push({ type: 'inter', text: 'And the winning house is…', final: true });
+      steps.push({ type: o.pos === 1 ? 'champ' : 'card', item: o.item, pos: o.pos, total: hs.length });
+    });
+    intro = `${plural(hs.length, 'house')}, revealed from ${hs.length}${ordSuffix(hs.length)} place up to 1st.`;
+  } else {
+    const sp = getSpotlight();
+    const sorted = sp.leaders;   // only the top section is counted down
+    if (!sorted.length) { toast('No results to reveal yet'); return; }
+    if (sp.risers.length) steps.push({ type: 'risers', risers: sp.risers });
+    sorted.map((c, i) => ({ item: groupRevealItem(c), pos: i + 1 })).reverse().forEach(o => {
+      if (o.pos === 3) steps.push({ type: 'inter', text: 'In third place…' });
+      if (o.pos === 2) steps.push({ type: 'inter', text: 'In second place…' });
+      if (o.pos === 1) steps.push({ type: 'inter', text: 'And your champions are…', final: true });
+      steps.push({ type: o.pos === 1 ? 'champ' : 'card', item: o.item, pos: o.pos, total: sorted.length });
+    });
+    intro = `${sp.risers.length ? `First, the tutor groups on the rise. Then the top ${sorted.length}` : `The top ${sorted.length} tutor groups`}, revealed from ${sorted.length}${ordSuffix(sorted.length)} place up to 1st.`;
+  }
+  reveal = { open: true, mode, started: false, finished: false, paused: false, auto: true, steps, idx: -1, timer: null, last: null };
+  document.getElementById('revealSub').textContent = `${settings.title || 'Attendance League'} · ${mode === 'houses' ? 'House race' : 'Tutor groups'}`;
   document.getElementById('revealDone').innerHTML = '';
   document.getElementById('revealHint').hidden = true;
   document.getElementById('revealStage').innerHTML = `<div class="reveal-start">
-    <p>${sp.risers.length ? `First, the groups on the rise. Then the top ${sorted.length}` : `The top ${sorted.length}`}, revealed from ${sorted.length}${ordSuffix(sorted.length)} place up to 1st.</p>
+    <p>${intro}</p>
     <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
       <button class="btn btn-primary" onclick="startReveal(true)">Start the reveal</button>
       <button class="btn" onclick="startReveal(false)">Click to advance</button>
@@ -1888,10 +1921,11 @@ function openReveal() {
 function renderRevealControls() {
   const c = document.getElementById('revealControls');
   const sound = `<button class="btn" onclick="soundOn=!soundOn;renderRevealControls()">${soundOn ? 'Sound on' : 'Sound off'}</button>`;
+  const skipLabel = reveal.mode === 'houses' ? 'Skip to the winner' : 'Skip to champions';
   if (!reveal.started) c.innerHTML = `${sound}<button class="btn" onclick="closeReveal()">Close</button>`;
-  else if (reveal.finished) c.innerHTML = `<button class="btn btn-primary" onclick="openReveal()">Run it again</button><button class="btn" onclick="closeReveal()">Close</button>`;
+  else if (reveal.finished) c.innerHTML = `<button class="btn btn-primary" onclick="openReveal('${reveal.mode}')">Run it again</button><button class="btn" onclick="closeReveal()">Close</button>`;
   else c.innerHTML = `${reveal.auto ? `<button class="btn" onclick="toggleRevealPause()">${reveal.paused ? 'Resume' : 'Pause'}</button>` : ''}
-    <button class="btn" onclick="skipToChampion()">Skip to champions</button>${sound}<button class="btn" onclick="closeReveal()">Close</button>`;
+    <button class="btn" onclick="skipToChampion()">${skipLabel}</button>${sound}<button class="btn" onclick="closeReveal()">Close</button>`;
 }
 function toggleRevealPause() {
   reveal.paused = !reveal.paused;
@@ -1916,11 +1950,12 @@ function scheduleRevealStep(delay) {
 }
 function stashLast() {
   if (!reveal.last) return;
-  const { cls, pos } = reveal.last;
+  const { item, pos } = reveal.last;
   document.getElementById('revealDone').insertAdjacentHTML('afterbegin',
-    `<span class="gchip"><b>${pos}${ordSuffix(pos)}</b><span class="dot" style="background:${cls.colour}"></span>${nm(cls)}</span>`);
+    `<span class="gchip"><b>${pos}${ordSuffix(pos)}</b><span class="dot" style="background:${item.colour}"></span>${item.label}</span>`);
   reveal.last = null;
 }
+const revealNote = item => item.note ? `<div class="reveal-note">${item.note}</div>` : '';
 function revealStep() {
   reveal.idx++;
   const step = reveal.steps[reveal.idx];
@@ -1939,29 +1974,26 @@ function revealStep() {
     fanfare();
     scheduleRevealStep(Math.min(9000, 4000 + list.length * 400));
   } else if (step.type === 'inter') {
-    const champ = step.text.includes('champions');
     stage.innerHTML = `<div class="reveal-inter">${step.text}</div>`;
-    drumroll(champ ? 2.2 : 1.6);
-    scheduleRevealStep(champ ? 2400 : 1900);
+    drumroll(step.final ? 2.2 : 1.6);
+    scheduleRevealStep(step.final ? 2400 : 1900);
   } else if (step.type === 'card') {
-    const s = getStats(step.cls);
     const medal = step.pos === 2 ? '🥈 ' : step.pos === 3 ? '🥉 ' : '';
-    stage.innerHTML = `<div class="reveal-card" style="--rc:${step.cls.colour}">
+    stage.innerHTML = `<div class="reveal-card" style="--rc:${step.item.colour}">
       <div class="reveal-pos">${step.pos}${ordSuffix(step.pos)}</div>
       <div style="min-width:0">
-        <div class="reveal-name">${medal}${nm(step.cls)}</div>
-        <div class="reveal-meta"><span><b>${s.pts}</b> points</span><span><b>${pct(s.overallPct)}</b> average</span>${step.cls.house ? `<span>${esc(step.cls.house)}</span>` : ''}</div>
+        <div class="reveal-name">${medal}${step.item.label}</div>
+        <div class="reveal-meta">${step.item.meta}</div>${revealNote(step.item)}
       </div></div>`;
-    reveal.last = { cls: step.cls, pos: step.pos };
+    reveal.last = { item: step.item, pos: step.pos };
     tone(300 + (step.total - step.pos) * (500 / step.total), 0.16, 0.1);
-    scheduleRevealStep(step.pos > 10 ? 1100 : step.pos > 3 ? 1600 : 2400);
+    scheduleRevealStep(reveal.mode === 'houses' ? 3200 : step.pos > 3 ? 1600 : 2400);
   } else {
-    const s = getStats(step.cls);
-    stage.innerHTML = `<div class="reveal-champ" style="--rc:${step.cls.colour}">
+    stage.innerHTML = `<div class="reveal-champ" style="--rc:${step.item.colour}">
       <div class="trophy">🏆</div>
-      <div class="lab">Your champions</div>
-      <div class="nm">${nm(step.cls)}</div>
-      <div class="reveal-meta" style="justify-content:center"><span><b>${s.pts}</b> points</span><span><b>${pct(s.overallPct)}</b> average</span><span><b>${s.wins}</b> wins</span>${step.cls.house ? `<span>${esc(step.cls.house)}</span>` : ''}</div>
+      <div class="lab">${reveal.mode === 'houses' ? 'Winning house' : 'Your champions'}</div>
+      <div class="nm">${step.item.label}</div>
+      <div class="reveal-meta" style="justify-content:center">${step.item.champMeta}</div>${revealNote(step.item)}
     </div>`;
     reveal.finished = true;
     document.getElementById('revealHint').hidden = true;
@@ -1974,7 +2006,7 @@ function skipToChampion() {
   stashLast();
   for (let i = reveal.idx + 1; i < reveal.steps.length; i++) {
     const st = reveal.steps[i];
-    if (st.type === 'card') { reveal.last = { cls: st.cls, pos: st.pos }; stashLast(); }
+    if (st.type === 'card') { reveal.last = { item: st.item, pos: st.pos }; stashLast(); }
   }
   reveal.idx = reveal.steps.findIndex(s => s.type === 'champ') - 1;
   revealStep();
@@ -2025,7 +2057,8 @@ function buildKioskSlides() {
     if (hs.length) slides.push({ title: 'House race', html: `<div class="k-houses">${hs.map((h, i) => `
       <div class="k-house"><div class="house-strip" style="background:${h.colour}"></div>
         <div class="k-house-body"><div class="pos">${i + 1}${ordSuffix(i + 1)}</div><div class="nm">${esc(h.name)}</div>
-        <div class="pts">${h.pts}<small>pts</small></div><div class="avg">${pct(h.avg)} average</div></div></div>`).join('')}</div>` });
+        <div class="pts">${h.pts}<small>pts</small></div><div class="avg">${pct(h.avg)} tutor group average</div></div></div>`).join('')}</div>
+      <div class="kiosk-meta" style="margin-top:2.4vh">The tutor group average is the average of each tutor group's weekly attendance in the house.</div>` });
   }
   const lines = buildNewsLines();
   if (lines.length) slides.push({ title: 'League news', html: `<div class="k-news">${lines.slice(0, 5).map(l => `<div>${l}</div>`).join('')}</div>` });
