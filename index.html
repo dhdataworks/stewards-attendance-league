@@ -1296,7 +1296,7 @@ function renderOverview(sorted, prev) {
   document.getElementById('kpiRow').innerHTML =
     kpi('Weeks played', `${lw}<small>of ${weekCount}</small>`, lw ? `Week ${lw} is the latest entered` : 'No weeks entered yet') +
     kpi(`Points earned${lw ? ' · Week ' + lw : ''}`, weekPts ? `${weekPts.pts}<small>points</small>` : '—', delta || '&nbsp;') +
-    kpi(`Wins (95%+)${lw ? ' · Week ' + lw : ''}`, `${winners}<small>of ${entered}</small>`, lw ? `${plural(winners, 'group')} scored 3 points` : '&nbsp;') +
+    kpi(`Wins (95%+)${lw ? ' · Week ' + lw : ''}`, `${winners}<small>${winners === 1 ? 'win' : 'wins'}</small>`, lw ? `${plural(winners, 'group')} scored 3 points` : '&nbsp;') +
     lastTile;
 
   const top = sorted.filter(c => getStats(c).played > 0).slice(0, 5);
